@@ -202,7 +202,7 @@ def main():
                             )
                             
                             # Show success message with counts
-                            matched_count = result_df['ITEM NAME'].notna().str.len().gt(0).sum()
+                            matched_count = result_df['ITEM NAME'].notna().sum()
                             total_count = len(result_df)
                             st.markdown(
                                 f'<div class="success-message">✅ Processing completed successfully!<br>'
