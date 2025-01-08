@@ -21,6 +21,7 @@ st.markdown("""
         background-color: #FF4B4B;
         color: white;
         font-weight: bold;
+        padding: 0.5rem 1rem;
     }
     .success-message {
         padding: 1rem;
@@ -47,6 +48,12 @@ st.markdown("""
         margin-top: 1rem;
         margin-bottom: 2rem;
     }
+    .column-info {
+        background-color: #F8F9FA;
+        padding: 1rem;
+        border-radius: 0.5rem;
+        margin: 1rem 0;
+    }
     </style>
 """, unsafe_allow_html=True)
 
@@ -64,27 +71,60 @@ def find_sheet_names(sheets):
             
     return noc_sheet, rec_sheet
 
+def get_order_id_column(df):
+    """Find the order ID column name in the dataframe"""
+    possible_names = ['order_id', 'Order ID', 'OrderID', 'orderid', 'Order Id']
+    for name in possible_names:
+        if name in df.columns:
+            return name
+    return df.columns[0]  # Return first column if no match found
+
+def get_product_name_column(df):
+    """Find the product name column in the dataframe"""
+    possible_names = ['Product Name', 'product_name', 'ProductName', 'ITEM NAME', 'Item Name']
+    for name in possible_names:
+        if name in df.columns:
+            return name
+    return df.columns[1]  # Return second column if no match found
+
 def process_sheets(noc_df, rec_df):
     try:
-        # Create a mapping of order_id to item_name from NOC sheet
+        # Debug information
+        st.markdown('<div class="column-info">', unsafe_allow_html=True)
+        st.write("NOC Sheet Columns:", list(noc_df.columns))
+        st.write("REC Sheet Columns:", list(rec_df.columns))
+        st.markdown('</div>', unsafe_allow_html=True)
+        
+        # Handle NaN values
         noc_df = noc_df.fillna('')
         rec_df = rec_df.fillna('')
+        
+        # Get column names dynamically
+        noc_order_id_col = get_order_id_column(noc_df)
+        noc_product_name_col = get_product_name_column(noc_df)
+        rec_order_id_col = get_order_id_column(rec_df)
         
         # Create mapping from NOC sheet
         order_map = {}
         for _, row in noc_df.iterrows():
-            if row.iloc[0]:  # If order ID exists
-                order_map[str(row.iloc[0]).strip()] = row.iloc[1]  # Map order ID to item name
+            if row[noc_order_id_col]:
+                order_map[str(row[noc_order_id_col]).strip()] = row[noc_product_name_col]
         
-        # Update REC sheet
+        # Ensure ITEM NAME column exists
+        if 'ITEM NAME' not in rec_df.columns:
+            rec_df['ITEM NAME'] = ''
+        
+        # Update REC sheet with matched items
         for idx, row in rec_df.iterrows():
-            order_id = str(row['Order ID']).strip() if 'Order ID' in rec_df.columns else None
-            if order_id and order_id in order_map:
+            order_id = str(row[rec_order_id_col]).strip()
+            if order_id in order_map:
                 rec_df.at[idx, 'ITEM NAME'] = order_map[order_id]
         
         return rec_df
     except Exception as e:
         st.error(f"Error in processing: {str(e)}")
+        import traceback
+        st.error(f"Detailed error: {traceback.format_exc()}")
         return None
 
 def main():
@@ -124,11 +164,15 @@ def main():
                 
                 with tab1:
                     st.markdown(f"#### {noc_sheet} Sheet Data")
+                    st.markdown("**Column Names:**")
+                    st.write(list(st.session_state.noc_df.columns))
                     st.dataframe(st.session_state.noc_df, use_container_width=True)
                     st.markdown(f"Total rows: {len(st.session_state.noc_df)}")
                 
                 with tab2:
                     st.markdown(f"#### {rec_sheet} Sheet Data")
+                    st.markdown("**Column Names:**")
+                    st.write(list(st.session_state.rec_df.columns))
                     st.dataframe(st.session_state.rec_df, use_container_width=True)
                     st.markdown(f"Total rows: {len(st.session_state.rec_df)}")
                 
@@ -143,7 +187,7 @@ def main():
                             
                             # Prepare download
                             buffer = io.BytesIO()
-                            with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
+                            with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
                                 result_df.to_excel(writer, sheet_name='Updated_REC', index=False)
                             
                             buffer.seek(0)
@@ -158,7 +202,7 @@ def main():
                             )
                             
                             # Show success message with counts
-                            matched_count = result_df['ITEM NAME'].notna().sum()
+                            matched_count = result_df['ITEM NAME'].notna().str.len().gt(0).sum()
                             total_count = len(result_df)
                             st.markdown(
                                 f'<div class="success-message">✅ Processing completed successfully!<br>'
@@ -187,6 +231,8 @@ def main():
                 f'<div class="error-message">❌ Error reading file: {str(e)}</div>',
                 unsafe_allow_html=True
             )
+            import traceback
+            st.error(f"Detailed error: {traceback.format_exc()}")
 
     else:
         st.markdown(
