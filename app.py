@@ -43,24 +43,42 @@ st.markdown("""
         color: #383D41;
         margin: 1rem 0;
     }
+    .stDataFrame {
+        margin-top: 1rem;
+        margin-bottom: 2rem;
+    }
     </style>
 """, unsafe_allow_html=True)
 
-def process_sheets(nov_df, rec_df):
+def find_sheet_names(sheets):
+    """Find NOC/NOV and REC sheets regardless of case"""
+    noc_sheet = None
+    rec_sheet = None
+    
+    for sheet in sheets:
+        sheet_lower = sheet.lower()
+        if sheet_lower in ['noc', 'nov']:
+            noc_sheet = sheet
+        elif sheet_lower == 'rec':
+            rec_sheet = sheet
+            
+    return noc_sheet, rec_sheet
+
+def process_sheets(noc_df, rec_df):
     try:
-        # Create a mapping of order_id to item_name from NOV sheet
-        nov_df = nov_df.fillna('')  # Handle any NaN values
+        # Create a mapping of order_id to item_name from NOC sheet
+        noc_df = noc_df.fillna('')
         rec_df = rec_df.fillna('')
         
-        # Create mapping from NOV sheet (assuming first column is Order ID and second is Item Name)
+        # Create mapping from NOC sheet
         order_map = {}
-        for _, row in nov_df.iterrows():
+        for _, row in noc_df.iterrows():
             if row.iloc[0]:  # If order ID exists
-                order_map[row.iloc[0]] = row.iloc[1]  # Map order ID to item name
+                order_map[str(row.iloc[0]).strip()] = row.iloc[1]  # Map order ID to item name
         
         # Update REC sheet
         for idx, row in rec_df.iterrows():
-            order_id = row['Order ID'] if 'Order ID' in rec_df.columns else None
+            order_id = str(row['Order ID']).strip() if 'Order ID' in rec_df.columns else None
             if order_id and order_id in order_map:
                 rec_df.at[idx, 'ITEM NAME'] = order_map[order_id]
         
@@ -71,11 +89,17 @@ def process_sheets(nov_df, rec_df):
 
 def main():
     st.title("📊 Excel Sheet Matcher")
-    st.markdown("### Match and populate item names between NOV and REC sheets")
+    st.markdown("### Match and populate item names between sheets")
+    
+    # Session state for storing DataFrames
+    if 'noc_df' not in st.session_state:
+        st.session_state.noc_df = None
+    if 'rec_df' not in st.session_state:
+        st.session_state.rec_df = None
     
     # File upload section
     st.markdown("### Upload Excel File")
-    uploaded_file = st.file_uploader("Choose Excel file containing NOV and REC sheets", type=['xlsx'])
+    uploaded_file = st.file_uploader("Choose Excel file containing NOC and REC sheets", type=['xlsx'])
 
     if uploaded_file:
         try:
@@ -83,28 +107,35 @@ def main():
             xls = pd.ExcelFile(uploaded_file)
             sheets = xls.sheet_names
             
-            # Check if required sheets exist
-            if 'NOV' in sheets and 'REC' in sheets:
-                st.markdown('<div class="success-message">✅ Both NOV and REC sheets found!</div>', unsafe_allow_html=True)
+            # Find sheets regardless of case
+            noc_sheet, rec_sheet = find_sheet_names(sheets)
+            
+            if noc_sheet and rec_sheet:
+                st.markdown(f'<div class="success-message">✅ Found sheets: {noc_sheet} and {rec_sheet}</div>', 
+                          unsafe_allow_html=True)
                 
-                # Read both sheets
-                nov_df = pd.read_excel(uploaded_file, sheet_name='NOV')
-                rec_df = pd.read_excel(uploaded_file, sheet_name='REC')
+                # Read both sheets and store in session state
+                st.session_state.noc_df = pd.read_excel(uploaded_file, sheet_name=noc_sheet)
+                st.session_state.rec_df = pd.read_excel(uploaded_file, sheet_name=rec_sheet)
                 
                 # Show data previews in tabs
-                st.markdown("### Preview of Sheets")
-                tab1, tab2 = st.tabs(["NOV Sheet", "REC Sheet"])
+                st.markdown("### Sheet Contents")
+                tab1, tab2 = st.tabs([f"{noc_sheet} Sheet", f"{rec_sheet} Sheet"])
                 
                 with tab1:
-                    st.dataframe(nov_df.head(), use_container_width=True)
+                    st.markdown(f"#### {noc_sheet} Sheet Data")
+                    st.dataframe(st.session_state.noc_df, use_container_width=True)
+                    st.markdown(f"Total rows: {len(st.session_state.noc_df)}")
                 
                 with tab2:
-                    st.dataframe(rec_df.head(), use_container_width=True)
+                    st.markdown(f"#### {rec_sheet} Sheet Data")
+                    st.dataframe(st.session_state.rec_df, use_container_width=True)
+                    st.markdown(f"Total rows: {len(st.session_state.rec_df)}")
                 
                 # Process button
                 if st.button("Process Sheets"):
                     with st.spinner("Processing sheets..."):
-                        result_df = process_sheets(nov_df, rec_df)
+                        result_df = process_sheets(st.session_state.noc_df, st.session_state.rec_df)
                         
                         if result_df is not None:
                             st.markdown("### Results")
@@ -126,20 +157,24 @@ def main():
                                 mime="application/vnd.ms-excel"
                             )
                             
+                            # Show success message with counts
+                            matched_count = result_df['ITEM NAME'].notna().sum()
+                            total_count = len(result_df)
                             st.markdown(
-                                '<div class="success-message">✅ Processing completed successfully!</div>',
+                                f'<div class="success-message">✅ Processing completed successfully!<br>'
+                                f'Matched {matched_count} out of {total_count} records.</div>',
                                 unsafe_allow_html=True
                             )
             else:
                 missing_sheets = []
-                if 'NOV' not in sheets:
-                    missing_sheets.append('NOV')
-                if 'REC' not in sheets:
+                if not noc_sheet:
+                    missing_sheets.append('NOC/NOV')
+                if not rec_sheet:
                     missing_sheets.append('REC')
                     
                 st.markdown(
                     f'<div class="error-message">❌ Missing required sheets: {", ".join(missing_sheets)}. '
-                    f'Please ensure your Excel file contains both NOV and REC sheets.</div>',
+                    f'Please ensure your Excel file contains both NOC/NOV and REC sheets.</div>',
                     unsafe_allow_html=True
                 )
                 
@@ -155,7 +190,7 @@ def main():
 
     else:
         st.markdown(
-            '<div class="info-message">ℹ️ Please upload an Excel file containing both NOV and REC sheets.</div>',
+            '<div class="info-message">ℹ️ Please upload an Excel file containing both NOC/NOV and REC sheets.</div>',
             unsafe_allow_html=True
         )
 
